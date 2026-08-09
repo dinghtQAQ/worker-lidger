@@ -23,6 +23,9 @@ _STATUSES = frozenset(("paid", "pending"))
 _ID_PATTERN = re.compile(r"[0-9]+")
 _DATE_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _MONTH_PATTERN = re.compile(r"[0-9]{4}-[0-9]{2}")
+_SQLITE_MAX_INTEGER = (1 << 63) - 1
+_MAX_INSTALLMENT_COUNT = 1200
+_SQLITE_MAX_INTEGER_TEXT = str(_SQLITE_MAX_INTEGER)
 _BASE_FIELDS = frozenset(("kind", "category_id", "amount_minor", "currency", "occurred_on", "description"))
 _SCHEDULE_FIELDS = frozenset(("installment_count", "first_due_on", "interval_months"))
 
@@ -317,6 +320,7 @@ def _create_plan(
     first_due_on: str,
     interval_months: int,
 ) -> None:
+    _validate_schedule_bounds(total, count)
     cursor = connection.execute(
         "INSERT INTO installment_plans "
         "(entry_id, total_amount_minor, installment_count, currency) VALUES (?, ?, ?, ?)",
@@ -334,6 +338,7 @@ def _rebuild_plan(
     first_due_on: str,
     interval_months: int,
 ) -> None:
+    _validate_schedule_bounds(total, count)
     connection.execute("DELETE FROM installments WHERE plan_id = ?", (plan_id,))
     connection.execute(
         "UPDATE installment_plans SET total_amount_minor = ?, installment_count = ?, currency = ?, status = 'active' "
@@ -351,6 +356,7 @@ def _remove_plan(connection: sqlite3.Connection, plan_id: int) -> None:
 def _insert_schedule(
     connection: sqlite3.Connection, plan_id: int, total: int, count: int, first_due_on: str, interval_months: int
 ) -> None:
+    _validate_schedule_bounds(total, count)
     quotient, remainder = divmod(total, count)
     first = date.fromisoformat(first_due_on)
     for sequence in range(1, count + 1):
@@ -487,9 +493,13 @@ def _parse_entry_payload(body: bytes, partial: bool, update: bool = False) -> di
             raise _LedgerError(422, "invalid_kind")
         values["kind"] = payload["kind"]
     if "category_id" in payload:
-        values["category_id"] = _positive_int(payload["category_id"], "invalid_category_id")
+        values["category_id"] = _positive_int(
+            payload["category_id"], "invalid_category_id", _SQLITE_MAX_INTEGER
+        )
     if "amount_minor" in payload:
-        values["amount_minor"] = _positive_int(payload["amount_minor"], "invalid_amount_minor")
+        values["amount_minor"] = _positive_int(
+            payload["amount_minor"], "invalid_amount_minor", _SQLITE_MAX_INTEGER
+        )
     if "currency" in payload:
         currency = payload["currency"]
         if not isinstance(currency, str) or not re.fullmatch(r"[A-Z]{3}", currency):
@@ -504,7 +514,9 @@ def _parse_entry_payload(body: bytes, partial: bool, update: bool = False) -> di
             raise _LedgerError(422, "invalid_description")
         values["description"] = description
     if "installment_count" in payload:
-        values["installment_count"] = _positive_int(payload["installment_count"], "invalid_installment_count")
+        values["installment_count"] = _positive_int(
+            payload["installment_count"], "invalid_installment_count", _MAX_INSTALLMENT_COUNT
+        )
     if "interval_months" in payload:
         interval = payload["interval_months"]
         if type(interval) is not int or not 1 <= interval <= 12:
@@ -518,6 +530,7 @@ def _parse_entry_payload(body: bytes, partial: bool, update: bool = False) -> di
 
 
 def _validate_category(connection: sqlite3.Connection, category_id: int, kind: str) -> None:
+    _positive_int(category_id, "invalid_category_id", _SQLITE_MAX_INTEGER)
     row = connection.execute(
         "SELECT active, kind FROM categories WHERE id = ?", (category_id,)
     ).fetchone()
@@ -542,15 +555,26 @@ def _require_entry(connection: sqlite3.Connection, entry_id: int):
 
 def _path_id(request: Request, resource: str) -> int:
     segment = request.path.split("?", 1)[0].rsplit("/", 1)[-1]
-    if not _ID_PATTERN.fullmatch(segment) or int(segment) <= 0:
+    if not _ID_PATTERN.fullmatch(segment):
         raise _LedgerError(400, "invalid_" + resource + "_id")
-    return int(segment)
+    normalized = segment.lstrip("0")
+    if not normalized or len(normalized) > len(_SQLITE_MAX_INTEGER_TEXT) or (
+        len(normalized) == len(_SQLITE_MAX_INTEGER_TEXT)
+        and normalized > _SQLITE_MAX_INTEGER_TEXT
+    ):
+        raise _LedgerError(400, "invalid_" + resource + "_id")
+    return int(normalized)
 
 
-def _positive_int(value: Any, error: str) -> int:
-    if type(value) is not int or value <= 0:
+def _positive_int(value: Any, error: str, maximum: int) -> int:
+    if type(value) is not int or not 0 < value <= maximum:
         raise _LedgerError(422, error)
     return value
+
+
+def _validate_schedule_bounds(total: int, count: int) -> None:
+    _positive_int(total, "invalid_amount_minor", _SQLITE_MAX_INTEGER)
+    _positive_int(count, "invalid_installment_count", _MAX_INSTALLMENT_COUNT)
 
 
 def _parse_date(value: Any, error: str) -> str:

@@ -44,6 +44,13 @@ class LedgerApiTests(unittest.TestCase):
         self.assertEqual(response.status, 201, response.json_body())
         return response.json_body()
 
+    def table_counts(self):
+        with self.db.connection() as connection:
+            return tuple(
+                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in ("ledger_entries", "installment_plans", "installments")
+            )
+
     def test_income_expense_list_and_single_entry_crud(self):
         income = self.entry("income", self.income_category, 250, description="工资")
         expense = self.entry(description="书")
@@ -114,6 +121,39 @@ class LedgerApiTests(unittest.TestCase):
         self.assertEqual(len(future.json_body()["items"]), 1)
         self.assertEqual(future.json_body()["items"][0]["status"], "pending")
         self.assertEqual(future.json_body()["totals"]["pending_minor"], 3333)
+
+    def test_integer_bounds_reject_before_any_ledger_write(self):
+        self.entry(amount_minor=100, installment_count=3)
+        counts = self.table_counts()
+        invalid_payloads = (
+            ("amount_minor", 2**63, "invalid_amount_minor"),
+            ("category_id", 2**63, "invalid_category_id"),
+            ("installment_count", 2**63, "invalid_installment_count"),
+            ("installment_count", 1201, "invalid_installment_count"),
+        )
+
+        for field, value, error in invalid_payloads:
+            with self.subTest(field=field, value=value):
+                response = self.request(
+                    "POST",
+                    "/v1/entries",
+                    {
+                        "kind": "expense",
+                        "category_id": self.expense_category,
+                        "amount_minor": 100,
+                        "currency": "CNY",
+                        "occurred_on": "2026-01-15",
+                        field: value,
+                    },
+                )
+                self.assertEqual(response.status, 422)
+                self.assertEqual(response.json_body(), {"error": error})
+                self.assertEqual(self.table_counts(), counts)
+
+        path_response = self.request("GET", f"/v1/entries/{2**63}")
+        self.assertEqual(path_response.status, 400)
+        self.assertEqual(path_response.json_body(), {"error": "invalid_entry_id"})
+        self.assertEqual(self.table_counts(), counts)
 
     def test_payment_toggle_updates_plan_and_preserves_audit(self):
         entry = self.entry(amount_minor=101, installment_count=2)
