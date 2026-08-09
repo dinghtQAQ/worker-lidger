@@ -29,27 +29,83 @@ class CategoryApiTests(unittest.TestCase):
         return response.json_body()
 
     def test_income_expense_roots_and_parent_child_categories(self):
-        expense = self.create("  饮食  ", "expense")
-        income = self.create("工资", "income")
+        expense = self.create("  自定义饮食  ", "expense")
+        income = self.create("自定义工资", "income")
         detail = self.create("外卖", "expense", expense["id"])
 
         response = self.request("GET", "/v1/categories")
         self.assertEqual(response.status, 200)
+        items = {item["id"]: item for item in response.json_body()["items"]}
         self.assertEqual(
-            response.json_body()["items"],
-            [
-                {"id": detail["id"], "name": "外卖", "kind": "expense", "parent_id": expense["id"], "active": 1},
-                {"id": expense["id"], "name": "饮食", "kind": "expense", "parent_id": None, "active": 1},
-                {"id": income["id"], "name": "工资", "kind": "income", "parent_id": None, "active": 1},
-            ],
+            {items[category["id"]]["name"] for category in (detail, expense, income)},
+            {"外卖", "自定义饮食", "自定义工资"},
         )
+        self.assertEqual(items[detail["id"]]["parent_id"], expense["id"])
+        self.assertEqual(items[expense["id"]]["kind"], "expense")
+        self.assertEqual(items[income["id"]]["kind"], "income")
         response = self.request("GET", f"/v1/categories/{detail['id']}?unused=yes")
         self.assertEqual(response.status, 200)
         self.assertEqual(response.json_body(), detail)
 
+    def test_default_categories_are_lazy_complete_and_idempotent(self):
+        with self.db.connection() as connection:
+            self.assertEqual(connection.execute("SELECT count(*) FROM categories").fetchone()[0], 0)
+
+        first = self.request("GET", "/v1/categories")
+        self.assertEqual(first.status, 200)
+        first_items = first.json_body()["items"]
+        by_name = {(item["name"], item["kind"]): item for item in first_items}
+        self.assertEqual(
+            set(by_name),
+            {
+                ("饮食", "expense"),
+                ("住房", "expense"),
+                ("交通", "expense"),
+                ("理财", "expense"),
+                ("购物", "expense"),
+                ("娱乐", "expense"),
+                ("通讯", "expense"),
+                ("游戏", "expense"),
+                ("水电费", "expense"),
+                ("话费", "expense"),
+                ("工资", "income"),
+                ("意外收入", "income"),
+            },
+        )
+        self.assertIsNone(by_name[("住房", "expense")]["parent_id"])
+        self.assertEqual(
+            by_name[("游戏", "expense")]["parent_id"], by_name[("娱乐", "expense")]["id"]
+        )
+        self.assertEqual(
+            by_name[("水电费", "expense")]["parent_id"], by_name[("住房", "expense")]["id"]
+        )
+        self.assertEqual(
+            by_name[("话费", "expense")]["parent_id"], by_name[("通讯", "expense")]["id"]
+        )
+
+        second = self.request("GET", "/v1/categories")
+        self.assertEqual(second.status, 200)
+        self.assertEqual(second.json_body(), first.json_body())
+
+    def test_default_seed_preserves_renamed_and_inactive_rows(self):
+        with self.db.transaction() as connection:
+            connection.execute("INSERT INTO categories(name, kind) VALUES ('工资', 'income')")
+            connection.execute("UPDATE categories SET name = '已改名工资', active = 0 WHERE name = '工资'")
+            connection.execute("INSERT INTO categories(name, kind, active) VALUES ('购物', 'expense', 0)")
+
+        response = self.request("GET", "/v1/categories")
+        self.assertEqual(response.status, 200)
+        items = response.json_body()["items"]
+        renamed = [item for item in items if item["name"] == "已改名工资"]
+        shopping = [item for item in items if item["name"] == "购物"]
+        self.assertEqual(len(renamed), 1)
+        self.assertEqual(renamed[0]["active"], 0)
+        self.assertEqual(len(shopping), 1)
+        self.assertEqual(shopping[0]["active"], 0)
+
     def test_duplicate_parent_kind_and_field_validation(self):
-        root = self.create("购物", "expense")
-        duplicate = self.request("POST", "/v1/categories", {"name": "购物", "kind": "expense", "parent_id": None})
+        root = self.create("自定义购物", "expense")
+        duplicate = self.request("POST", "/v1/categories", {"name": "自定义购物", "kind": "expense", "parent_id": None})
         self.assertEqual(duplicate.status, 409)
         wrong_parent = self.request(
             "POST", "/v1/categories", {"name": "错类", "kind": "income", "parent_id": root["id"]}
@@ -67,7 +123,7 @@ class CategoryApiTests(unittest.TestCase):
         self.assertEqual(too_long.status, 422)
 
     def test_full_and_partial_updates_keep_complete_object(self):
-        root = self.create("理财", "expense")
+        root = self.create("自定义理财", "expense")
         other = self.create("储蓄", "expense")
         child = self.create("基金", "expense", root["id"])
 
@@ -90,8 +146,8 @@ class CategoryApiTests(unittest.TestCase):
         self.assertEqual(missing.status, 404)
 
     def test_descendant_self_and_parent_changes_are_rejected(self):
-        root = self.create("住房", "expense")
-        child = self.create("水电费", "expense", root["id"])
+        root = self.create("自定义住房", "expense")
+        child = self.create("自定义水电费", "expense", root["id"])
         grandchild = self.create("电费", "expense", child["id"])
 
         self.assertEqual(
@@ -108,7 +164,7 @@ class CategoryApiTests(unittest.TestCase):
         )
 
     def test_soft_delete_preserves_referenced_category(self):
-        category = self.create("话费", "expense")
+        category = self.create("自定义话费", "expense")
         with self.db.transaction() as connection:
             connection.execute(
                 "INSERT INTO ledger_entries(kind, category_id, amount_minor, currency, occurred_on) "
@@ -120,8 +176,11 @@ class CategoryApiTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertEqual(response.json_body()["active"], 0)
         with self.db.connection() as connection:
-            self.assertEqual(connection.execute("SELECT count(*) FROM categories").fetchone()[0], 1)
             self.assertEqual(connection.execute("SELECT count(*) FROM ledger_entries").fetchone()[0], 1)
+            self.assertEqual(
+                connection.execute("SELECT active FROM categories WHERE id = ?", (category["id"],)).fetchone()[0],
+                0,
+            )
         self.assertEqual(self.request("DELETE", f"/v1/categories/{category['id']}").json_body()["active"], 0)
 
     def test_unknown_routes_and_dynamic_route_method_behavior(self):

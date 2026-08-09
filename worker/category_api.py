@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from typing import Any, Mapping
+from typing import Any, Mapping, Optional
 
 from .config import Config
 from .db import Database
@@ -18,6 +18,21 @@ _KINDS = frozenset(("income", "expense"))
 _FIELDS = frozenset(("name", "kind", "parent_id"))
 _MAX_NAME_LENGTH = 100
 _ID_PATTERN = re.compile(r"[0-9]+")
+_CategorySeed = tuple[str, str, Optional[str]]
+_DEFAULT_CATEGORY_SEEDS: tuple[_CategorySeed, ...] = (
+    ("饮食", "expense", None),
+    ("住房", "expense", None),
+    ("交通", "expense", None),
+    ("理财", "expense", None),
+    ("购物", "expense", None),
+    ("娱乐", "expense", None),
+    ("通讯", "expense", None),
+    ("游戏", "expense", "娱乐"),
+    ("水电费", "expense", "住房"),
+    ("话费", "expense", "通讯"),
+    ("工资", "income", None),
+    ("意外收入", "income", None),
+)
 
 
 class _CategoryError(Exception):
@@ -31,12 +46,53 @@ def register(router: Router, db: Database, config: Config) -> None:
     """Register category collection and item routes on a standard Router."""
 
     del config
-    router.register("GET", _CATEGORY_PATH, lambda request: _invoke(lambda: _handle_list(db, request)))
-    router.register("POST", _CATEGORY_PATH, lambda request: _invoke(lambda: _handle_create(db, request)))
-    router.register("GET", _CATEGORY_ITEM_PATH, lambda request: _invoke(lambda: _handle_get(db, request)))
-    router.register("PUT", _CATEGORY_ITEM_PATH, lambda request: _invoke(lambda: _handle_put(db, request)))
-    router.register("PATCH", _CATEGORY_ITEM_PATH, lambda request: _invoke(lambda: _handle_patch(db, request)))
-    router.register("DELETE", _CATEGORY_ITEM_PATH, lambda request: _invoke(lambda: _handle_delete(db, request)))
+    router.register("GET", _CATEGORY_PATH, lambda request: _invoke(db, lambda: _handle_list(db, request)))
+    router.register("POST", _CATEGORY_PATH, lambda request: _invoke(db, lambda: _handle_create(db, request)))
+    router.register("GET", _CATEGORY_ITEM_PATH, lambda request: _invoke(db, lambda: _handle_get(db, request)))
+    router.register("PUT", _CATEGORY_ITEM_PATH, lambda request: _invoke(db, lambda: _handle_put(db, request)))
+    router.register("PATCH", _CATEGORY_ITEM_PATH, lambda request: _invoke(db, lambda: _handle_patch(db, request)))
+    router.register("DELETE", _CATEGORY_ITEM_PATH, lambda request: _invoke(db, lambda: _handle_delete(db, request)))
+
+
+def _seed_categories(
+    connection: sqlite3.Connection, seeds: tuple[_CategorySeed, ...]
+) -> None:
+    """Insert configured category seeds without changing existing rows."""
+
+    seeded_ids: dict[tuple[str, str], int] = {}
+    for name, kind, parent_name in seeds:
+        if parent_name is None:
+            parent_id = None
+        else:
+            parent_id = seeded_ids.get((parent_name, kind))
+            if parent_id is None:
+                parent = connection.execute(
+                    "SELECT id FROM categories "
+                    "WHERE name = ? AND kind = ? AND parent_id IS NULL",
+                    (parent_name, kind),
+                ).fetchone()
+                if parent is None:
+                    continue
+                parent_id = parent["id"]
+
+        existing = connection.execute(
+            "SELECT id FROM categories WHERE name = ? AND kind = ? AND parent_id IS ?",
+            (name, kind, parent_id),
+        ).fetchone()
+        if existing is None:
+            cursor = connection.execute(
+                "INSERT INTO categories(name, kind, parent_id) VALUES (?, ?, ?)",
+                (name, kind, parent_id),
+            )
+            category_id = cursor.lastrowid
+        else:
+            category_id = existing["id"]
+        seeded_ids[(name, kind)] = category_id
+
+
+def _ensure_default_categories(db: Database) -> None:
+    with db.transaction() as connection:
+        _seed_categories(connection, _DEFAULT_CATEGORY_SEEDS)
 
 
 def _handle_list(db: Database, request: Request) -> Response:
@@ -271,8 +327,9 @@ def _integrity_error(error: sqlite3.IntegrityError) -> str:
     return "category_conflict"
 
 
-def _invoke(handler):
+def _invoke(db: Database, handler):
     try:
+        _ensure_default_categories(db)
         return handler()
     except _CategoryError as error:
         return Response.json(error.status, {"error": error.error})
