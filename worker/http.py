@@ -44,25 +44,62 @@ class Response:
 
 
 class Router:
-    """Exact-method/path router with an explicit registration point."""
+    """Method/path router with exact routes and one-segment templates."""
 
     def __init__(self) -> None:
         self._routes: dict[tuple[str, str], Handler] = {}
+        self._parameter_routes: list[tuple[str, str, Handler]] = []
 
     def register(self, method: str, path: str, handler: Handler) -> None:
         method = method.upper()
         if not method or not path.startswith("/"):
             raise ValueError("routes require an HTTP method and absolute path")
         key = (method, path)
-        if key in self._routes:
+        if key in self._routes or any(
+            route_method == method and route_path == path
+            for route_method, route_path, _ in self._parameter_routes
+        ):
             raise ValueError(f"route already registered: {method} {path}")
-        self._routes[key] = handler
+        parts = path.split("/")
+        parameter_parts = [part for part in parts if part.startswith("{") or part.endswith("}")]
+        if parameter_parts:
+            if len(parameter_parts) != 1 or not (
+                parameter_parts[0].startswith("{") and parameter_parts[0].endswith("}")
+            ):
+                raise ValueError("routes support at most one complete path parameter")
+            self._parameter_routes.append((method, path, handler))
+        else:
+            self._routes[key] = handler
+
+    @staticmethod
+    def _matches(template: str, path: str) -> bool:
+        template_parts = template.split("/")
+        path_parts = path.split("/")
+        if len(template_parts) != len(path_parts):
+            return False
+        return all(
+            template_part == path_part
+            or (
+                template_part.startswith("{")
+                and template_part.endswith("}")
+                and bool(path_part)
+                and "/" not in path_part
+            )
+            for template_part, path_part in zip(template_parts, path_parts)
+        )
 
     def dispatch(self, request: Request) -> Response:
         path = request.path.split("?", 1)[0]
         handler = self._routes.get((request.method.upper(), path))
         if handler is None:
-            if any(route_path == path for _, route_path in self._routes):
+            for method, template, candidate in self._parameter_routes:
+                if method == request.method.upper() and self._matches(template, path):
+                    handler = candidate
+                    break
+        if handler is None:
+            if any(route_path == path for _, route_path in self._routes) or any(
+                self._matches(template, path) for _, template, _ in self._parameter_routes
+            ):
                 return Response.json(405, {"error": "method_not_allowed"})
             return Response.json(404, {"error": "not_found"})
         try:
