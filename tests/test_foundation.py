@@ -23,10 +23,28 @@ class FoundationTests(unittest.TestCase):
         self.assertEqual(config.host, "127.0.0.1")
         self.assertEqual(config.port, 8080)
         self.assertEqual(config.db_path, "worker/data/ledger.sqlite3")
+        self.assertEqual(config.max_body_bytes, 1_048_576)
+        self.assertEqual(Config.from_env({"WORKER_MAX_BODY_BYTES": "4"}).max_body_bytes, 4)
         with self.assertRaises(ConfigError):
             Config.from_env({"WORKER_HOST": "0.0.0.0"})
         config = Config.from_env({"WORKER_HOST": "0.0.0.0", "WORKER_API_TOKEN": "secret"})
         self.assertEqual(config.api_token, "secret")
+
+    def test_body_limit_rejects_invalid_and_unsafe_values(self):
+        for raw_value in ("", "not-an-integer", "0", "-1", "16777217"):
+            with self.subTest(raw_value=raw_value):
+                with self.assertRaises(ConfigError):
+                    Config.from_env({"WORKER_MAX_BODY_BYTES": raw_value})
+
+        for value in (0, -1, 16 * 1024 * 1024 + 1, True):
+            with self.subTest(value=value):
+                with self.assertRaises(ConfigError):
+                    Config(max_body_bytes=value)
+
+        self.assertEqual(
+            Config(max_body_bytes=16 * 1024 * 1024).max_body_bytes,
+            16 * 1024 * 1024,
+        )
 
     def test_health_and_token_authentication(self):
         app = create_app(Config(db_path=self.db_path, api_token="top-secret"))

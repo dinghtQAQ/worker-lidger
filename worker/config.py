@@ -12,6 +12,10 @@ class ConfigError(ValueError):
     """Raised when worker configuration is invalid or unsafe."""
 
 
+DEFAULT_MAX_BODY_BYTES = 1_048_576
+MAX_BODY_BYTES_LIMIT = 16 * 1024 * 1024
+
+
 def _is_loopback(host: str) -> bool:
     if host.lower() == "localhost":
         return True
@@ -29,7 +33,7 @@ class Config:
     port: int = 8080
     db_path: str = "worker/data/ledger.sqlite3"
     api_token: str | None = None
-    max_body_bytes: int = 1_048_576
+    max_body_bytes: int = DEFAULT_MAX_BODY_BYTES
 
     def __post_init__(self) -> None:
         if not self.host or not self.host.strip():
@@ -38,8 +42,14 @@ class Config:
             raise ConfigError("WORKER_PORT must be between 0 and 65535")
         if not self.db_path or not self.db_path.strip():
             raise ConfigError("WORKER_DB_PATH must not be empty")
-        if not isinstance(self.max_body_bytes, int) or self.max_body_bytes <= 0:
-            raise ConfigError("max_body_bytes must be positive")
+        if (
+            not isinstance(self.max_body_bytes, int)
+            or isinstance(self.max_body_bytes, bool)
+            or not 0 < self.max_body_bytes <= MAX_BODY_BYTES_LIMIT
+        ):
+            raise ConfigError(
+                f"max_body_bytes must be between 1 and {MAX_BODY_BYTES_LIMIT}"
+            )
         if self.api_token is not None and not self.api_token:
             raise ConfigError("WORKER_API_TOKEN must not be empty")
         if not _is_loopback(self.host) and not self.api_token:
@@ -60,4 +70,17 @@ class Config:
         token = values.get("WORKER_API_TOKEN")
         if token == "":
             token = None
-        return cls(host=host, port=port, db_path=db_path, api_token=token)
+        raw_max_body_bytes = values.get(
+            "WORKER_MAX_BODY_BYTES", str(DEFAULT_MAX_BODY_BYTES)
+        ).strip()
+        try:
+            max_body_bytes = int(raw_max_body_bytes)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError("WORKER_MAX_BODY_BYTES must be an integer") from exc
+        return cls(
+            host=host,
+            port=port,
+            db_path=db_path,
+            api_token=token,
+            max_body_bytes=max_body_bytes,
+        )
