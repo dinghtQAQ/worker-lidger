@@ -19,3 +19,4 @@ build/
 worker/config.toml
 worker/data/
 .DS_Store
+._*
