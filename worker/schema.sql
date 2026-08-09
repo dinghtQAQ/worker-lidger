@@ -60,6 +60,7 @@ END;
 
 CREATE TABLE IF NOT EXISTS installment_plans (
     id INTEGER PRIMARY KEY,
+    entry_id INTEGER REFERENCES ledger_entries(id) ON DELETE RESTRICT,
     total_amount_minor INTEGER NOT NULL
         CHECK (typeof(total_amount_minor) = 'integer' AND total_amount_minor >= 0),
     installment_count INTEGER NOT NULL CHECK (installment_count > 0),
@@ -68,6 +69,9 @@ CREATE TABLE IF NOT EXISTS installment_plans (
     status TEXT NOT NULL DEFAULT 'active'
         CHECK (status IN ('active', 'completed', 'voided'))
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS installment_plans_entry_id_uq
+    ON installment_plans(entry_id) WHERE entry_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS installments (
     id INTEGER PRIMARY KEY,
