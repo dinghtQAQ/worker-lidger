@@ -1,8 +1,14 @@
 .env
 .env.*
 !.env.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
 .venv/
 venv/
+node_modules/
+.wrangler/
+worker-configuration.d.ts
 __pycache__/
 *.py[cod]
 .pytest_cache/
