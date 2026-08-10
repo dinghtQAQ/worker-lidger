@@ -1,0 +1,8 @@
+[project]
+name = "worker-lidger"
+version = "0.1.0"
+description = "Standard-library worker ledger foundation"
+requires-python = ">=3.9"
+
+[tool.unittest]
+testpaths = ["tests"]
