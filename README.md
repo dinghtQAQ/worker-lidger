@@ -82,3 +82,40 @@ python3 -m worker
 
 Cloudflare deployments use `src/index.mjs` and D1 migrations from
 `migrations/`; they do not run the Python server.
+
+## iPhone Shortcut
+
+The signed, importable shortcut is
+[`shortcuts/worker-lidger.shortcut`](shortcuts/worker-lidger.shortcut). Send it
+to an iPhone with AirDrop or iCloud Drive, open it in Shortcuts, and answer the
+two setup questions:
+
+1. Enter the deployed Worker's HTTPS URL without a trailing slash, for example
+   `https://ledger.example.com`.
+2. Enter the same private token configured as `WORKER_API_TOKEN` on the Worker.
+
+The values in the repository are placeholders. The token is used only to form
+the `Authorization: Bearer <token>` request header; the shortcut never shows it
+in a result or includes it in a URL. If setup questions are not shown by an
+older iOS release, edit the first two configurable Text actions immediately
+after import and replace `https://YOUR-WORKER.example.com` and
+`PASTE_BEARER_TOKEN_HERE`.
+
+At runtime, choose income or expense, a live top-level category, an optional
+matching child category (`无细项` skips it), and a positive CNY amount. Amounts
+with more than two decimal places, zero, and negative values are rejected. The
+shortcut uses the phone's current local date and displays either the created
+entry ID or a concise API error.
+
+The maintainable source is
+[`scripts/generate-shortcut.mjs`](scripts/generate-shortcut.mjs); its generated
+plist is [`shortcuts/worker-lidger.shortcut.plist`](shortcuts/worker-lidger.shortcut.plist).
+On macOS, rebuild and apply Apple's `anyone` signature with:
+
+```sh
+npm run shortcut:build
+npm run test:shortcut
+```
+
+`shortcut:build` requires the macOS `shortcuts` and `plutil` commands. Never
+put a real deployment URL or token in the committed source before rebuilding.
