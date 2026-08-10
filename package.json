@@ -8,7 +8,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "python3 -m unittest discover -v && node --test \"tests_cloudflare/*.test.mjs\"",
+    "test": "python3 -m unittest discover -v && node --test \"tests_cloudflare/*.test.mjs\" && node --test \"tests_shortcuts/*.test.mjs\"",
+    "test:shortcut": "node --test \"tests_shortcuts/*.test.mjs\"",
+    "shortcut:build": "./scripts/build-shortcut.sh",
     "dev": "wrangler dev",
     "db:migrations:local": "wrangler d1 migrations apply DB --local",
     "db:migrations:apply": "wrangler d1 migrations apply DB --remote",
