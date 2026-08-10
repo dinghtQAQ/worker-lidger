@@ -1,11 +1,84 @@
 # worker-lidger
 
-Personal income and expense ledger backend designed for a worker deployment.
+Personal income and expense ledger API for Cloudflare Workers and D1.
 
-The service keeps deployment-specific and private values in the worker
-configuration. The API will cover configurable income/expense categories,
-ledger CRUD, and installment allocation with upcoming and unpaid periods.
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/dinghtQAQ/worker-lidger)
 
-## Delivery
+The deploy flow creates the Worker and D1 database, asks for the private
+`WORKER_API_TOKEN`, applies remote D1 migrations, and then deploys the Worker.
+The repository contains only deploy-button defaults; Cloudflare replaces the
+D1 resource ID during provisioning.
 
-The local integration branch is `codex/test`; the target branch is `main`.
+## Local Cloudflare development
+
+Requires Node.js 22 or later and a Cloudflare account for remote operations.
+
+```sh
+npm install
+cp .dev.vars.example .dev.vars
+npm run db:migrations:local
+npm run dev
+```
+
+Replace the placeholder in `.dev.vars` with a long random token. Wrangler reads
+that file only for local development; it is ignored by Git.
+
+Run both the Python reference tests and the Worker tests with:
+
+```sh
+npm test
+```
+
+## Deploy
+
+The button above is the one-click path for this public repository. For a manual
+deployment, authenticate Wrangler, create the production secret, and deploy:
+
+```sh
+npx wrangler login
+npx wrangler d1 create worker-lidger-db
+npx wrangler secret put WORKER_API_TOKEN
+npm run deploy
+```
+
+For a manual deployment, replace the all-zero `database_id` in
+`wrangler.jsonc` with the ID returned by `wrangler d1 create`. Keep that
+deployment-specific value local and do not commit it. One-click deployment
+performs this D1 provisioning and configuration automatically.
+
+`npm run deploy` runs `wrangler d1 migrations apply DB --remote` before
+`wrangler deploy`. The command targets the `DB` binding so it also works when a
+deployer chooses a different database name. Never commit `.dev.vars`, real
+tokens, Cloudflare account IDs, or provisioned database IDs.
+
+## API
+
+`GET /healthz` is public. All `/v1/*` routes require:
+
+```http
+Authorization: Bearer <WORKER_API_TOKEN>
+Content-Type: application/json
+```
+
+The API provides category CRUD at `/v1/categories`, ledger entry CRUD at
+`/v1/entries`, installment status at `/v1/installments/{id}`, and monthly views
+at `/v1/months/{month}` where `month` is `YYYY-MM`.
+
+Monetary fields such as `amount_minor` are integers in the currency's minor
+unit, never binary floating-point values. For CNY, `amount_minor` is fen, so
+`1234` represents CNY 12.34.
+
+Deleting categories deactivates them and deleting ledger entries voids them,
+preserving an auditable financial history.
+
+## Python reference backend
+
+The standard-library Python server remains available as a local/reference
+backend. Configure it with `.env.example`, then run:
+
+```sh
+python3 -m worker
+```
+
+Cloudflare deployments use `src/index.mjs` and D1 migrations from
+`migrations/`; they do not run the Python server.
