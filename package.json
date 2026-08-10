@@ -1,0 +1,40 @@
+{
+  "name": "worker-lidger",
+  "version": "0.1.0",
+  "description": "Personal income and expense ledger for Cloudflare Workers and D1",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "python3 -m unittest discover -v && node --test \"tests_cloudflare/*.test.mjs\"",
+    "dev": "wrangler dev",
+    "db:migrations:local": "wrangler d1 migrations apply DB --local",
+    "db:migrations:apply": "wrangler d1 migrations apply DB --remote",
+    "deploy": "npm run db:migrations:apply && wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.120.0"
+  },
+  "cloudflare": {
+    "label": "worker-lidger",
+    "products": [
+      "Workers",
+      "D1"
+    ],
+    "categories": [
+      "storage"
+    ],
+    "docs_url": "https://developers.cloudflare.com/workers/",
+    "publish": true,
+    "bindings": {
+      "WORKER_API_TOKEN": {
+        "description": "Required private bearer token for ledger API requests. Generate a long random value and never commit it."
+      },
+      "DB": {
+        "description": "D1 database that stores categories, ledger entries, and installment schedules. Cloudflare provisions it during one-click deployment."
+      }
+    }
+  }
+}
