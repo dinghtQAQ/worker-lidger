@@ -83,29 +83,36 @@ python3 -m worker
 Cloudflare deployments use `src/index.mjs` and D1 migrations from
 `migrations/`; they do not run the Python server.
 
-## iPhone Shortcut
+## iPhone 快捷指令
 
-The signed, importable shortcut is
-[`shortcuts/worker-lidger.shortcut`](shortcuts/worker-lidger.shortcut). Send it
-to an iPhone with AirDrop or iCloud Drive, open it in Shortcuts, and answer the
-two setup questions:
+已签名、可导入的文件是
+[`shortcuts/worker-lidger.shortcut`](shortcuts/worker-lidger.shortcut)。
 
-1. Enter the deployed Worker's HTTPS URL without a trailing slash, for example
-   `https://ledger.example.com`.
-2. Enter the same private token configured as `WORKER_API_TOKEN` on the Worker.
+### 导入与首次配置
 
-The values in the repository are placeholders. The token is used only to form
-the `Authorization: Bearer <token>` request header; the shortcut never shows it
-in a result or includes it in a URL. If setup questions are not shown by an
-older iOS release, edit the first two configurable Text actions immediately
-after import and replace `https://YOUR-WORKER.example.com` and
-`PASTE_BEARER_TOKEN_HERE`.
+1. 从 GitHub 下载该文件，或用 AirDrop / iCloud Drive 发到 iPhone。
+2. 在 iPhone 上点开文件，选择“添加快捷指令”。
+3. 安装时依次填写：
+   - 已部署 Worker 的 HTTPS 地址，**末尾不加 `/`**，例如
+     `https://ledger.example.com`。
+   - Worker 配置的 `WORKER_API_TOKEN` 的**原始 Token 值**；不要输入
+     `Bearer ` 前缀。
+4. 运行“Worker Lidger 记账”：选择收入或支出、粗项、细项（可选“无细项”），
+   再输入正数金额即可。
 
-At runtime, choose income or expense, a live top-level category, an optional
-matching child category (`无细项` skips it), and a positive CNY amount. Amounts
-with more than two decimal places, zero, and negative values are rejected. The
-shortcut uses the phone's current local date and displays either the created
-entry ID or a concise API error.
+快捷指令会从 Worker 动态读取当前可用分类，使用手机本地当天日期，并将人民币金额
+转换为以“分”为单位的整数后提交。金额最多保留两位小数，不能为零或负数。
+
+Token 只会用于构造 `Authorization: Bearer <token>` 请求头，不会显示在结果中、
+写入 URL，或提交到仓库。若旧版 iOS 没有显示安装问题，导入后编辑最前面的两个“文本”
+动作，将其替换为 Worker URL 和 Token。
+
+### 常见问题
+
+- “未授权”：确认 Token 与 Cloudflare Worker 的 `WORKER_API_TOKEN` 完全一致，且
+  不要在 Token 输入框加 `Bearer `。
+- “获取分类失败”：确认 Worker 已部署、URL 可从 iPhone 访问，且必须为 HTTPS。
+- 没有细项：选择“无细项”即可将该笔账归入所选粗项。
 
 The maintainable source is
 [`scripts/generate-shortcut.mjs`](scripts/generate-shortcut.mjs); its generated
