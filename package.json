@@ -32,7 +32,7 @@
     "publish": true,
     "bindings": {
       "WORKER_API_TOKEN": {
-        "description": "Required private bearer token for ledger API requests. Generate a long random value and never commit it."
+        "description": "Required private bearer token. Generate and paste a unique random value; this template has no usable default. Save the raw value for the iPhone Shortcut (without the Bearer prefix) and never commit it."
       },
       "DB": {
         "description": "D1 database that stores categories, ledger entries, and installment schedules. Cloudflare provisions it during one-click deployment."
