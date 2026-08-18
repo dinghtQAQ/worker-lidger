@@ -1,1 +1,2 @@
+# Generate a unique token locally. This placeholder is not a production secret.
 WORKER_API_TOKEN=replace-with-a-long-random-secret
