@@ -3,6 +3,9 @@
   "name": "worker-lidger",
   "main": "src/index.mjs",
   "compatibility_date": "2026-08-10",
+  "secrets": {
+    "required": ["WORKER_API_TOKEN"]
+  },
   "d1_databases": [
     {
       "binding": "DB",
